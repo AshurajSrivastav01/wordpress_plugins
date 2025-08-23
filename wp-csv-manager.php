@@ -64,21 +64,145 @@ function csv_manager_page() {
     </div>
     <?php
 
-    // ==================== IMPORT CSV ====================
+    // ==================== IMPORT CSV (batched + transaction + safe) ====================
     if (isset($_POST['import_csv']) && !empty($_FILES['import_file']['tmp_name'])) {
+        global $wpdb;
+
+        // Let long imports finish
+        ignore_user_abort(true);
+        @set_time_limit(0);                 // remove 30s limit
+        @ini_set('memory_limit', '512M');   // bump memory for big CSVs
+
         $table = sanitize_text_field($_POST['import_table']);
         $file  = $_FILES['import_file']['tmp_name'];
 
-        if (($handle = fopen($file, "r")) !== FALSE) {
-            $columns = fgetcsv($handle, 1000, ","); // first row = headers
+        // 0) Resolve real table columns (prevents "Unknown column ' ... '")
+        $dbcols = $wpdb->get_col("DESCRIBE {$table}", 0); // actual column names in the table
+        if (empty($dbcols)) {
+            echo "<p style='color:red;'>Cannot DESCRIBE table <code>{$table}</code>. Check DB permissions.</p>";
+            return;
+        }
 
-            while (($data = fgetcsv($handle, 1000, ",")) !== FALSE) {
-                $row = array_combine($columns, $data);
-                $wpdb->insert($table, $row);
+        // Counters
+        $inserted = 0;
+        $failed   = 0;
+        $skipped  = 0;
+        $rownum   = 0;
+
+        if (($handle = fopen($file, "r")) !== FALSE) {
+            // 1) Read and sanitize headers
+            // Use length = 0 (unlimited) so long lines don’t get truncated
+            $rawHeaders = fgetcsv($handle, 0, ",");
+            if ($rawHeaders === FALSE) {
+                echo "<p style='color:red;'>Could not read CSV header row.</p>";
+                fclose($handle);
+                return;
             }
+
+            // Trim BOM, spaces
+            $headers = array_map(function($h) {
+                $h = preg_replace('/^\xEF\xBB\xBF/', '', $h); // strip UTF-8 BOM
+                return trim($h);
+            }, $rawHeaders);
+
+            // Keep only columns that actually exist in the DB table (order preserved)
+            $columns = array_values(array_intersect($headers, $dbcols));
+            if (empty($columns)) {
+                echo "<p style='color:red;'>None of the CSV headers match columns in <code>{$table}</code>.</p>";
+                fclose($handle);
+                return;
+            }
+
+            // 2) Begin transaction
+            $wpdb->query("START TRANSACTION");
+
+            // Batch commit setup
+            $batchSize = 500;
+            $sinceCommit = 0;
+
+            while (($data = fgetcsv($handle, 0, ",")) !== FALSE) {
+                $rownum++;
+
+                // Build an associative row using only allowed columns
+                // Map header -> value first, then pick allowed columns in that order
+                if (count($headers) !== count($data)) {
+                    $skipped++;
+                    // Optional: show a tiny hint (don’t flood screen for huge files)
+                    if ($skipped <= 5) {
+                        echo "<p style='color:#d98500;'>Row {$rownum}: header/data column count mismatch. Skipped.</p>";
+                    }
+                    continue;
+                }
+
+                $fullRow = array_combine($headers, $data);
+                $fullRow = array_map('trim', $fullRow);
+
+                // Keep only DB columns
+                $row = [];
+                foreach ($columns as $col) {
+                    $row[$col] = array_key_exists($col, $fullRow) ? $fullRow[$col] : null;
+                }
+
+                // Special handling for wp_users-like imports
+                if (isset($row['user_pass']) && $row['user_pass'] !== '') {
+                    // Hash plain passwords
+                    // If already hashed ($P$...), this still "works" but you can skip rehashing by checking prefix.
+                    if (strpos($row['user_pass'], '$P$') !== 0) {
+                        $row['user_pass'] = wp_hash_password($row['user_pass']);
+                    }
+                }
+
+                if (isset($row['user_registered'])) {
+                    if ($row['user_registered'] === '' || $row['user_registered'] === '0000-00-00 00:00:00') {
+                        $row['user_registered'] = current_time('mysql');
+                    }
+                }
+
+                // Let MySQL assign ID if blank to avoid duplicate key errors on wp_users
+                if (array_key_exists('ID', $row) && ($row['ID'] === '' || $row['ID'] === null)) {
+                    unset($row['ID']);
+                }
+
+                // Insert row (per-row insert inside a transaction)
+                $ok = $wpdb->insert($table, $row);
+
+                if ($ok === false) {
+                    $failed++;
+                    if ($failed <= 5) {
+                        echo "<p style='color:red;'>
+                            Row {$rownum} failed.<br>
+                            <strong>Error:</strong> " . esc_html($wpdb->last_error) . "<br>
+                            <strong>SQL:</strong> " . esc_html($wpdb->last_query) . "
+                        </p>";
+                    }
+                } else {
+                    $inserted++;
+                }
+
+                $sinceCommit++;
+
+                // Commit every batch to avoid huge transactions and show progress
+                if ($sinceCommit >= $batchSize) {
+                    $wpdb->query("COMMIT");
+                    $wpdb->query("START TRANSACTION");
+                    $sinceCommit = 0;
+
+                    // Light progress ping (don’t overdo it)
+                    echo "<p>Progress: inserted {$inserted}, failed {$failed}, skipped {$skipped}…</p>";
+                    @ob_flush(); @flush();
+                }
+            }
+
+            // Final commit
+            $wpdb->query("COMMIT");
             fclose($handle);
 
-            echo "<p style='color:green;'><strong>CSV Imported successfully into {$table}.</strong></p>";
+            echo "<p style='color:green; font-weight:bold;'>
+                Import finished for <code>{$table}</code>.<br>
+                Inserted: {$inserted} | Failed: {$failed} | Skipped: {$skipped}
+            </p>";
+        } else {
+            echo "<p style='color:red;'>Could not open uploaded CSV file.</p>";
         }
     }
 
