@@ -3,7 +3,7 @@
  * Plugin Name: CSV User Migrator
  * Description: Import users from CSV and update wp_users + wp_usermeta with Rainmaker data.
  * Version: 1.0
- * Author: Ashu
+ * Author: LDS Engineers
  */
 
 if (!defined('ABSPATH')) exit;
