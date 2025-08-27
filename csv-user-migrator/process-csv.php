@@ -9,7 +9,8 @@ if (!defined('ABSPATH')) {
 // define( 'WP_DEBUG_DISPLAY', false );
 
 // ✅ Add time limit at top
-set_time_limit(300); // or ini_set('max_execution_time', 0);
+// set_time_limit(300); // or ini_set('max_execution_time', 0);
+ini_set('max_execution_time', 0);
 
 
 try {
@@ -36,6 +37,16 @@ try {
                 $email        = sanitize_email($data['user_email']);
                 $nicename     = sanitize_text_field($data['user_nicename']);
                 $display_name = sanitize_text_field($data['display_name']);
+                
+                $first_name = !empty($data['first_name']) ? sanitize_text_field($data['first_name']) : '';
+                $last_name  = !empty($data['last_name'])  ? sanitize_text_field($data['last_name'])  : '';
+
+                if (!empty($first_name)) {
+                    update_user_meta($user_id, 'first_name', $first_name);
+                }
+                if (!empty($last_name)) {
+                    update_user_meta($user_id, 'last_name', $last_name);
+                }
 
                 // Use default password if not given
                 $password_plain = "MySecret123"; // your own password
@@ -59,6 +70,8 @@ try {
                         'ID'           => $user_id,
                         'user_nicename'=> $nicename,
                         'display_name' => $display_name,
+                        'first_name'   => $first_name,
+                        'last_name'    => $last_name,
                     ]);
 
                     // Default WordPress meta
