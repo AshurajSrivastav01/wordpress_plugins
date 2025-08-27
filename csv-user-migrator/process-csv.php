@@ -4,6 +4,14 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// define( 'WP_DEBUG', true );
+// define( 'WP_DEBUG_LOG', true );
+// define( 'WP_DEBUG_DISPLAY', false );
+
+// ✅ Add time limit at top
+set_time_limit(300); // or ini_set('max_execution_time', 0);
+
+
 try {
     // Check if a file was uploaded
     if (isset($_FILES['csv_file']) && $_FILES['csv_file']['error'] === UPLOAD_ERR_OK) {
@@ -95,13 +103,21 @@ try {
                             foreach ($course_ids_array as $course_id) {
                                 $course_id = trim($course_id);
                                 if (!empty($course_id)) {
-                                    # Enroll user in the course
-                                    $enrollment_result = ld_update_course_access($user_id, $course_id);
 
-                                    if (is_wp_error($enrollment_result)) {
-                                        error_log("User ID $user_id enrollment failed for Course ID $course_id: " . $enrollment_result->get_error_message());
-                                    } else {
-                                        error_log("User ID $user_id enrolled successfully in Course ID $course_id.");
+                                    // Now Get Course ID of Current(New Wordpress Site) Course ID for user Enrolment
+                                    // Correct enrolment block
+                                    $sql = "SELECT id_learndash FROM {$wpdb->prefix}rainmaker_learndash_courseid_mapping 
+                                            WHERE id_rainmaker = " . intval($course_id);
+                                    $mapped_course = $wpdb->get_row($sql);   
+
+                                    if ($mapped_course && !empty($mapped_course->id_learndash)) {
+                                        $enrollment_result = ld_update_course_access($user_id, $mapped_course->id_learndash);
+
+                                        if (is_wp_error($enrollment_result)) {
+                                            error_log("User ID $user_id enrollment failed for Course ID $mapped_course->id_learndash: " . $enrollment_result->get_error_message());
+                                        } else {
+                                            error_log("User ID $user_id enrolled successfully in Course ID $mapped_course->id_learndash.");
+                                        }
                                     }
                                 }
                             }
