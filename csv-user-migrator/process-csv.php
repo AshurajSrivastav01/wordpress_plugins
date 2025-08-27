@@ -41,13 +41,6 @@ try {
                 $first_name = !empty($data['first_name']) ? sanitize_text_field($data['first_name']) : '';
                 $last_name  = !empty($data['last_name'])  ? sanitize_text_field($data['last_name'])  : '';
 
-                if (!empty($first_name)) {
-                    update_user_meta($user_id, 'first_name', $first_name);
-                }
-                if (!empty($last_name)) {
-                    update_user_meta($user_id, 'last_name', $last_name);
-                }
-
                 // Use default password if not given
                 $password_plain = "MySecret123"; // your own password
                 $password = wp_hash_password($password_plain);
@@ -77,6 +70,13 @@ try {
                     // Default WordPress meta
                     update_user_meta($user_id, $wpdb->prefix.'capabilities', ['subscriber' => true]);
                     update_user_meta($user_id, $wpdb->prefix.'user_level', 0);
+
+                    if (!empty($first_name)) {
+                        update_user_meta($user_id, 'first_name', $first_name);
+                    }
+                    if (!empty($last_name)) {
+                        update_user_meta($user_id, 'last_name', $last_name);
+                    }
 
                     // ✅ New meta keys from CSV
                     update_user_meta($user_id, 'rainmaker_user_id', $data['rainmaker_user_id']);
